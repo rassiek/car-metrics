@@ -18,9 +18,23 @@
 const char* CONFIG_FILE = "/sensor_config.json";
 
 // DS18B20 Setup
-const int ONEWIRE_PIN = 4;
-OneWire oneWire(ONEWIRE_PIN);
-DallasTemperature sensors(&oneWire);
+///const int ONEWIRE_PIN = 4;
+///OneWire oneWire(ONEWIRE_PIN);
+///DallasTemperature sensors(&oneWire);
+
+// OneWire Bus Pins
+const int ONEWIRE_MAIN_BUS_PIN = 4;   // Pin for your normally connected sensors (use your current pin number here)
+const int ONEWIRE_DISCOVERY_PIN = 25; // CHOOSE AN UNUSED GPIO PIN for new sensor discovery (e.g., 25, 26, etc.)
+
+// For Main Operational Bus
+OneWire oneWireMain(ONEWIRE_MAIN_BUS_PIN);
+DallasTemperature sensorsMain(&oneWireMain);
+
+// For Discovery Bus
+OneWire oneWireDiscovery(ONEWIRE_DISCOVERY_PIN);
+DallasTemperature sensorsDiscovery(&oneWireDiscovery); // Used if discoverOneWireDevices reads temp
+
+
 
 // OneWire device discovery
 std::vector<String> discoveredOneWireAddressesHex;
@@ -191,7 +205,7 @@ void checkAllSensorAlerts() { /* ... same as before ... */
 // --- Sensor Reading Functions ---
 void readDS18B20Sensor(SensorConfig &sensor) {
   if (sensor.enabled && sensor.sensorType == TEMP_DS18B20) {
-    float tempC = sensors.getTempC(sensor.oneWireAddress);
+    float tempC = sensorsMain.getTempC(sensor.oneWireAddress);
     if (tempC == DEVICE_DISCONNECTED_C || tempC == 85.0 || tempC == -127.0) {
       sensor.value = -999.0;
       if(sensor.consecutiveFailures < 255) sensor.consecutiveFailures++;
@@ -251,7 +265,7 @@ void loadDefaultConfiguration() { /* ... same as before ... */
   Serial.println("Loading default sensor configurations...");
   numConfiguredSensors = 0;
   if (numConfiguredSensors < MAX_SENSORS) {
-    configuredSensors[numConfiguredSensors] = { "coolant_temp", "Coolant", TEMP_DS18B20, ONEWIRE_PIN, -1, -1, {0x28, 0xFF, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01}, true, 0.0, 0, 95.0, 105.0, 60.0, 50.0, true }; numConfiguredSensors++;
+    configuredSensors[numConfiguredSensors] = { "coolant_temp", "Coolant", TEMP_DS18B20, ONEWIRE_MAIN_BUS_PIN, -1, -1, {0x28, 0xFF, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01}, true, 0.0, 0, 95.0, 105.0, 60.0, 50.0, true }; numConfiguredSensors++;
   }
   if (numConfiguredSensors < MAX_SENSORS) {
     configuredSensors[numConfiguredSensors] = { "oil_pressure", "Oil PSI", PRESSURE_ANALOG, 34, -1, -1, {0}, true, 0.0, 0, 20.0, 80.0, 10.0, 5.0, true }; numConfiguredSensors++;
@@ -379,10 +393,10 @@ void discoverOneWireDevices(bool forceScan = false, bool printToSerial = false) 
 
   discoveredOneWireAddressesHex.clear();
   uint8_t newAddr[8];
-  oneWire.reset_search();
+  oneWireDiscovery.reset_search();
   delay(100); // Small delay after reset_search can sometimes help stability
 
-  while (oneWire.search(newAddr)) {
+  while (oneWireDiscovery.search(newAddr)) {
     if (OneWire::crc8(newAddr, 7) == newAddr[7]) {
       String addrHex = oneWireAddressToString(newAddr);
       discoveredOneWireAddressesHex.push_back(addrHex);
@@ -392,7 +406,7 @@ void discoverOneWireDevices(bool forceScan = false, bool printToSerial = false) 
         if (sensors.isParasitePowerMode()) Serial.print(" (Parasite Power)");
         DeviceAddress da;
         for(int k=0; k<8; k++) da[k] = newAddr[k];
-        Serial.print(" Temp: "); Serial.print(sensors.getTempC(da)); Serial.println("C");
+        Serial.print(" Temp: "); Serial.print(sensorsDiscovery.getTempC(da)); Serial.println("C");
       }
     } else {
       if (printToSerial) Serial.println("  Found device with CRC error.");
@@ -613,7 +627,7 @@ void readAllSensors() { /* ... same as before, with all real read functions call
         ds18b20Present = true; break;
       }
     }
-    if (ds18b20Present) { sensors.requestTemperatures(); }
+    if (ds18b20Present) { sensorsMain.requestTemperatures(); }
   }
   static unsigned long lastReadTime = 0;
   if (millis() - lastReadTime > 250) {
@@ -710,9 +724,15 @@ void setup() {
   initSPIFFS(); // Initialize SPIFFS first
   loadConfiguration(); // Load configuration from SPIFFS or set defaults
 
-  sensors.begin();
-  Serial.println("DS18B20 sensors driver initialized.");
+  ///sensors.begin();
+  ///Serial.println("DS18B20 sensors driver initialized.");
+  sensorsMain.begin();
+  Serial.println("Main OneWire Bus (sensorsMain) initialized.");
 
+  sensorsDiscovery.begin();
+  Serial.println("Discovery OneWire Bus (sensorsDiscovery) initialized.");
+
+  
   Serial.println("Initializing BMP280 sensor...");
   if (bmp.begin(BMP280_ADDRESS_ALT)) {
     bmpAvailable = true;
